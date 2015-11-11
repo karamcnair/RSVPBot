@@ -19,8 +19,9 @@ MSG_TIME_SET_ALLDAY            = 'This is now an all day long event.'
 MSG_STRING_ATTR_SET            = "The %s for this event has been set to **%s**!\n`rsvp help` for more options."
 MSG_ATTENDANCE_LIMIT_SET       = "The attendance limit for this event has been set to **%d**! Hurry up and `rsvp yes` now!.\n`rsvp help` for more options"
 MSG_EVENT_CANCELED             = "The event has been canceled!"
-MSG_YES_NO_CONFIRMED           = u'@**%s** is %s attending!'
-
+MSG_YES_CONFIRMED              = "@**%s** is attending!"
+MSG_NO_CONFIRMED               = "@**%s** is **not** attending!"
+MSG_MAYBE_CONFIRMED            = "@**%s** might be attending. It\'s complicated."
 
 """
 
@@ -91,6 +92,7 @@ class RSVPInitCommand(RSVPCommand):
             'creator': sender_id,
             'yes': [],
             'no': [],
+            'maybe': [],
             'time': None,
             'limit': None,
             'date': '%s' % datetime.date.today(),
@@ -108,6 +110,7 @@ class RSVPHelpCommand(RSVPCommand):
     body += "--- | ---\n"
     body += "**`rsvp yes`**|Marks **you** as attending this event.\n"
     body += "**`rsvp no`**|Marks you as **not** attending this event.\n"
+    body += "**`rsvp maybe`**|Marks you as maybe attending this event.\n"
     body += "`rsvp init`|Initializes a thread as an RSVPBot event. Must be used before any other command.\n"
     body += "`rsvp help`|Shows this handy table.\n"
     body += "`rsvp ping <message>`|Pings everyone that has RSVP'd so far. Optionally, sends a message, if provided.\n"
@@ -147,11 +150,12 @@ class LimitReachedException(Exception):
   pass
 
 class RSVPConfirmCommand(RSVPEventNeededCommand):
-  regex = r'.*?\b(?P<decision>(yes|no))\b'
+  regex = r'.*?\b(?P<decision>(yes|no|maybe))\b'
 
-  opposite = {
-    'yes': 'no',
-    'no': 'yes'
+  responses = {
+    "yes": MSG_YES_CONFIRMED,
+    "no": MSG_NO_CONFIRMED,
+    "maybe": MSG_MAYBE_CONFIRMED,
   }
 
   vips = [
@@ -177,16 +181,23 @@ class RSVPConfirmCommand(RSVPEventNeededCommand):
   ]
 
   def confirm(self, event, sender_full_name, decision):
+    # Temporary kludge to add a 'maybe' array to legacy events. Can be removed after 
+    # all currently logged events have passed.
+    if ('maybe' not in event.keys()):
+      event['maybe'] = [];
 
-    # If they're on the opposite list, take them out.
-    if sender_full_name in event[self.opposite[decision]]:
-      event[self.opposite[decision]].remove(sender_full_name)
-
-    if sender_full_name not in event[decision]:
-      event[decision].append(sender_full_name)
+    # If they're in a different response list, take them out of it.
+    for response in self.responses.keys():
+      # prevent duplicates if replying multiple times
+      if (response == decision): 
+        # if they're already in that list, nothing to do
+        if (sender_full_name not in event[response]):
+          event[response].append(sender_full_name)
+      # else, remove all instances of them from other response lists.
+      elif sender_full_name in event[response]:
+        event[response] = [value for value in event[response] if value != sender_full_name]
 
     return event
-
 
   def attempt_confirm(self, event, sender_full_name, decision, limit):
     if decision == 'yes' and limit:
@@ -205,8 +216,6 @@ class RSVPConfirmCommand(RSVPEventNeededCommand):
 
     limit = event['limit']
 
-    body = ERROR_INTERNAL
-
     vip_prefix = ''
     vip_postfix = ''
 
@@ -224,15 +233,13 @@ class RSVPConfirmCommand(RSVPEventNeededCommand):
           vip_postfix = random.choice(self.vip_no_postfixes)
 
       # Update the events dict with the new event.
-      events.update(event)
-      response_string = MSG_YES_NO_CONFIRMED % (sender_full_name, '' if decision == 'yes' else '**not**')
+      events[event_id] = event
+      response_string = self.responses.get(decision) % sender_full_name
       response_string = vip_prefix + response_string + vip_postfix
       return RSVPCommandResponse(response_string, events)
 
     except LimitReachedException:
       return RSVPCommandResponse(ERROR_LIMIT_REACHED, events)
-
-
 
 class RSVPSetLimitCommand(RSVPEventNeededCommand):
   regex = r'set limit (?P<limit>\d+)$'
@@ -332,6 +339,9 @@ class RSVPPingCommand(RSVPEventNeededCommand):
     for participant in event['yes']:
       body += "@**%s** " % participant
 
+    for participant in event['maybe']:
+      body += "@*%s* " % participant
+
     if message:
       body += ('\n' + message)
 
@@ -344,7 +354,9 @@ class RSVPCreditsCommand(RSVPEventNeededCommand):
 
   def run(self, events, *args, **kwargs):
 
-    contributors = ["Mudit Ameta (SP2'15)", "Diego Berrocal (F2'15)", "Shad William Hopson (F1'15)", "Tom Murphy (F2'15)", "Miriam Shiffman (F2'15)", "Anjana Sofia Vakil (F2'15)"]
+    contributors = ["Mudit Ameta (SP2'15)", "Diego Berrocal (F2'15)", "Shad William Hopson (F1'15)", 
+    "Tom Murphy (F2'15)", "Miriam Shiffman (F2'15)", "Anjana Sofia Vakil (F2'15)",
+    "Steven McCarthy (SP2'15)]","Kara McNair (F2'15)"]
     testers = ["Nikki Bee (SP2'15)", "Anthony Burdi (SP1'15)", "Noella D'sa (SP2'15)", "Mudit Ameta (SP2'15)"]
 
     body = "RSVPBot was created by @**Carlos Flores (SP2'15)**\nWith **contributions** from:\n"
@@ -359,7 +371,7 @@ class RSVPCreditsCommand(RSVPEventNeededCommand):
     return RSVPCommandResponse(body, events)
 
 class RSVPSummaryCommand(RSVPEventNeededCommand):
-  regex = r'summary$'
+  regex = r'(summary$|status$)'
 
   def run(self, events, *args, **kwargs):
     event = kwargs.pop('event')
@@ -379,16 +391,17 @@ class RSVPSummaryCommand(RSVPEventNeededCommand):
       limit_str
     )
 
+    confirmation_table = 'YES ({}) |NO ({}) |MAYBE({}) \n:---:|:---:|:---:\n'
 
-    confirmation_table = 'YES ({}) |NO ({}) \n:---:|:---:\n'
-    confirmation_table = confirmation_table.format(len(event['yes']), len(event['no']))
+    confirmation_table = confirmation_table.format(len(event['yes']), len(event['no']), len(event['maybe']))
 
-    row_list = map(None, event['yes'], event['no'])
+    row_list = map(None, event['yes'], event['no'], event['maybe'])
 
     for row in row_list:
-      confirmation_table += '{}|{}\n'.format(
+      confirmation_table += '{}|{}|{}\n'.format(
         '' if row[0] is None else row[0],
-        '' if row[1] is None else row[1]
+        '' if row[1] is None else row[1],
+        '' if row[2] is None else row[2]
       )
     else:
       confirmation_table += '\t|\t'
