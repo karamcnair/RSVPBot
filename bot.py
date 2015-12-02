@@ -80,18 +80,21 @@ class bot():
             "content": msg['body']
         })
 
-        if self.echo_stream is not '' 
+        if self.echo_stream is not '':
 
             # guard: don't echo messages sent within in the Echo stream.
             # don't echo private messages at all
             # 
 
+            link_to_rvsp_thread = self.site + "/#narrow/stream/" + msg_to + "/topic/" + msg["subject"]
+
             self.client.send_message({
                 "type": msg['type'],
                 "subject": msg_to + "/" + msg["subject"],
                 "to": self.echo_stream,
-                "content": msg['body']
+                "content": "[" + msg_to + "/" + msg["subject"] + "](" + link_to_rvsp_thread + ")\n" + msg['body']
             })
+
 
 
     def main(self):
