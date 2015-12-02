@@ -13,12 +13,13 @@ class bot():
         an optional caption or list of captions, and a list of the zulip streams it should be active in.
         it then posts a caption and a randomly selected gif in response to zulip messages.
      '''
-    def __init__(self, zulip_username, zulip_api_key, key_word, subscribed_streams=[], zulip_site=None):
+    def __init__(self, zulip_username, zulip_api_key, key_word, subscribed_streams=[], echo_stream='', zulip_site=None):
         self.username = zulip_username
         self.api_key = zulip_api_key
         self.site = zulip_site
         self.key_word = key_word.lower()
         self.subscribed_streams = subscribed_streams
+        self.echo_stream = echo_stream
         self.client = zulip.Client(zulip_username, zulip_api_key, site=zulip_site)
         self.subscriptions = self.subscribe_to_streams()
         self.rsvp = rsvp.RSVP(key_word)
@@ -52,6 +53,8 @@ class bot():
         ''' Subscribes to zulip streams
         '''
         self.client.add_subscriptions(self.streams)
+        # never subscribe to the echo stream
+
 
 
     def respond(self, message):
@@ -76,6 +79,19 @@ class bot():
             "to": msg_to,
             "content": msg['body']
         })
+
+        if self.echo_stream is not '' 
+
+            # guard: don't echo messages sent within in the Echo stream.
+            # don't echo private messages at all
+            # 
+
+            self.client.send_message({
+                "type": msg['type'],
+                "subject": msg_to + "/" + msg["subject"],
+                "to": self.echo_stream,
+                "content": msg['body']
+            })
 
 
     def main(self):
@@ -103,7 +119,8 @@ zulip_site = os.getenv('ZULIP_RSVP_SITE', None)
 key_word = 'rsvp'
 
 sandbox_stream =  os.getenv('ZULIP_RSVP_SANDBOX_STREAM', 'test-bot')
-subscribed_streams = [sandbox_stream]
+echo_stream =  os.getenv('ZULIP_RSVP_ECHO_STREAM', 'RSVPs')
+subscribed_streams = []
 
-new_bot = bot(zulip_username, zulip_api_key, key_word, subscribed_streams, zulip_site=zulip_site)
+new_bot = bot(zulip_username, zulip_api_key, key_word, subscribed_streams, echo_stream, zulip_site=zulip_site)
 new_bot.main()
